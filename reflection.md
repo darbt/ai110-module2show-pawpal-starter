@@ -12,7 +12,10 @@
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
 
----
+--- A user should be able to: 
+        Add a pet
+        Add a task
+        Edit tasks
 
 ## 2. Scheduling Logic and Tradeoffs
 

@@ -1,7 +1,7 @@
 classDiagram
     %% PawPal+ class diagram — keep updated as implementation evolves.
-
-    class Owner {
+ 
+ class Owner {
         +str name
         +str email
         +List~Pet~ pets
@@ -44,3 +44,5 @@ classDiagram
     Pet "1" --> "*" Task : has
     Scheduler ..> Task : schedules
     Task --> Priority : uses
+  
+  
