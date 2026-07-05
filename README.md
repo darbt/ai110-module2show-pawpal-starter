@@ -75,17 +75,38 @@ After Formatting:
 
 ```bash
 # Run the full test suite:
-pytest
+python -m pytest
 
 # Run with coverage:
 pytest --cov
 ```
 
-Sample test output:
+Recurrence:	one-off → None; fresh id + completed=False on the copy while source stays completed; due-date advances by recurrence_days incl. month rollover (Jul 30 → Aug 2); None due-date survives; complete_task appends exactly one tagged instance; one-offs add nothing (no cascade)
 
-```
+Sorting: 	HIGH-first ordering; the full tie-break chain (due_date → duration); None due-date sinks to the end via date.max; shortest-first; pet A–Z then priority; inputs never mutated; empty & single-item
+
+Greedy packing:	the key case — skip a too-long task but keep a later shorter one; exact-fit kept (<=); zero budget keeps only zero-duration
+
+Conflicts:	back-to-back (touching) is NOT a conflict; different pets never conflict; overlap returns the pair in plan order; 3-way same-pet → all 3 pairs
+
+generate_plan:	completed tasks dropped; start times chain back-to-back; empty plan → the exact "nothing fit" string
+
+explain_plan:	emits UserWarning and appends double-booked lines on conflict (pytest.warns)
+
 # Paste your pytest output here
 ```
+============================================================================================================== test session starts ===============================================================================================================
+platform win32 -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\trida\CodePath Assignments\ai110-module2show-pawpal-starter
+collected 26 items                                                                                                                                                                                                                                
+
+tests\test_pawpal.py ..........................                                                                                                                                                                                             [100%]
+
+=============================================================================================================== 26 passed in 0.03s ===============================================================================================================
+
+Confidence Level
+
+I would give my confidence level a 4. Its not a perfect score because we have to leave 1 point for anything we could've potentially missed. 
 
 ## 📐 Smarter Scheduling
 
