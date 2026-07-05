@@ -7,7 +7,8 @@ time budget, and can explain the plan it produced.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import warnings
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from enum import Enum
 from uuid import uuid4
@@ -31,12 +32,34 @@ class Task:
     duration: int = 0  # minutes
     priority: Priority = Priority.MEDIUM
     pet_name: str = ""  # which pet this task belongs to (for display)
+    recurrence_days: int | None = None  # repeat every N days; None = one-off
     id: str = field(default_factory=lambda: uuid4().hex)
     completed: bool = False
 
     def mark_complete(self) -> None:
         """Mark this task as done."""
         self.completed = True
+
+    def next_occurrence(self) -> Task | None:
+        """Build the next instance of a recurring task, or None if one-off.
+
+        Returns a fresh, not-completed copy with a new id and the due_date
+        advanced by recurrence_days. If there's no due_date, the copy keeps
+        due_date=None. Does not touch this task or any task list.
+        """
+        if self.recurrence_days is None:
+            return None
+        next_due = (
+            self.due_date + timedelta(days=self.recurrence_days)
+            if self.due_date is not None
+            else None
+        )
+        return replace(
+            self,
+            due_date=next_due,
+            completed=False,
+            id=uuid4().hex,
+        )
 
 
 @dataclass
@@ -59,6 +82,18 @@ class Pet:
         """Append a task to this pet's list, tagging it with the pet's name."""
         task.pet_name = self.name
         self.tasks.append(task)
+
+    def complete_task(self, task: Task) -> Task | None:
+        """Mark a task complete and, if it recurs, queue its next occurrence.
+
+        Appends the new instance to this pet's list (tagged with the pet's
+        name) and returns it, or None for a one-off task.
+        """
+        task.mark_complete()
+        upcoming = task.next_occurrence()
+        if upcoming is not None:
+            self.add_task(upcoming)
+        return upcoming
 
     def edit_task(self, task: Task) -> None:
         """Replace an existing task (matched by id) with an updated version.
@@ -116,6 +151,46 @@ class Scheduler:
             ),
         )
 
+    def sort_by_time(self, tasks: list[Task]) -> list[Task]:
+        """Return a new list sorted shortest-duration first.
+
+        Ties break by earlier due_date, then higher priority, so the order
+        is deterministic (important for stable tests).
+        """
+        return sorted(
+            tasks,
+            key=lambda t: (
+                t.duration,               # shorter tasks first
+                t.due_date or date.max,   # earlier deadlines first; None sinks to the end
+                -t.priority.value,        # HIGH(3) first
+            ),
+        )
+
+    def sort_by_pet(self, tasks: list[Task]) -> list[Task]:
+        """Return a new list grouped alphabetically by pet name.
+
+        Ties (same pet) break by higher priority, then earlier due_date, so
+        the order is deterministic (important for stable tests).
+        """
+        return sorted(
+            tasks,
+            key=lambda t: (
+                t.pet_name,               # group by pet, A-Z
+                -t.priority.value,        # HIGH(3) first within a pet
+                t.due_date or date.max,   # earlier deadlines first; None sinks to the end
+            ),
+        )
+
+    def filter_by_completion(
+        self, tasks: list[Task], completed: bool = False
+    ) -> list[Task]:
+        """Return tasks matching the given completion status, preserving order.
+
+        Defaults to completed=False so callers get the still-to-do tasks, which
+        is what the planner wants.
+        """
+        return [t for t in tasks if t.completed == completed]
+
     def filter_by_time(self, tasks: list[Task]) -> list[Task]:
         """Keep tasks (in the given order) that fit the time budget.
 
@@ -134,10 +209,11 @@ class Scheduler:
     def generate_plan(self, tasks: list[Task]) -> list[PlanEntry]:
         """Return a time-ordered daily plan.
 
-        Tasks are prioritized, trimmed to the time budget, then assigned
-        back-to-back start times beginning at day_start.
+        Completed tasks are dropped, then the rest are prioritized, trimmed to
+        the time budget, and assigned back-to-back start times from day_start.
         """
-        prioritized = self.sort_by_priority(tasks)
+        todo = self.filter_by_completion(tasks)  # skip already-done tasks
+        prioritized = self.sort_by_priority(todo)
         packed = self.filter_by_time(prioritized)
 
         plan: list[PlanEntry] = []
@@ -146,6 +222,51 @@ class Scheduler:
             plan.append(PlanEntry(task=task, start_time=clock.time()))
             clock += timedelta(minutes=task.duration)
         return plan
+
+    def find_conflicts(
+        self, plan: list[PlanEntry]
+    ) -> list[tuple[PlanEntry, PlanEntry]]:
+        """Return pairs of entries for the same pet whose times overlap.
+
+        Two entries conflict when they share a pet_name and their
+        [start, start + duration) intervals overlap — so a pet can't be in
+        two places at once. Back-to-back tasks (one ends exactly when the
+        next starts) do NOT count as a conflict. Order within each returned
+        pair follows the plan's order.
+        """
+        def bounds(entry: PlanEntry) -> tuple[datetime, datetime]:
+            start = datetime.combine(date.min, entry.start_time)
+            return start, start + timedelta(minutes=entry.task.duration)
+
+        conflicts: list[tuple[PlanEntry, PlanEntry]] = []
+        for i, a in enumerate(plan):
+            a_start, a_end = bounds(a)
+            for b in plan[i + 1:]:
+                if a.task.pet_name != b.task.pet_name:
+                    continue
+                b_start, b_end = bounds(b)
+                if a_start < b_end and b_start < a_end:  # strict: touching is OK
+                    conflicts.append((a, b))
+        return conflicts
+
+    def has_conflicts(self, plan: list[PlanEntry]) -> bool:
+        """True if any two same-pet entries in the plan overlap in time."""
+        return bool(self.find_conflicts(plan))
+
+    def conflict_warnings(self, plan: list[PlanEntry]) -> list[str]:
+        """Return one human-readable warning line per detected conflict.
+
+        Empty list if the plan is clean. This never raises — it's meant to
+        report problems without stopping the program.
+        """
+        lines = []
+        for a, b in self.find_conflicts(plan):
+            lines.append(
+                f"  [!] {a.task.pet_name} double-booked: "
+                f"{a.task.title} ({a.start_time:%H:%M}) overlaps "
+                f"{b.task.title} ({b.start_time:%H:%M})"
+            )
+        return lines
 
     def explain_plan(self, plan: list[PlanEntry]) -> str:
         """Render the plan as an aligned, terminal-friendly table."""
@@ -176,4 +297,17 @@ class Scheduler:
             f"  {len(plan)} task(s) · {used}/{self.available_minutes} min used "
             f"· {free} min free"
         )
-        return "\n".join(["  Daily Plan", divider, *rows, divider, footer])
+
+        lines = ["  Daily Plan", divider, *rows, divider, footer]
+
+        # Conflicts are reported, never fatal: emit a runtime warning and
+        # append the details to the rendered plan so the program keeps going.
+        warning_lines = self.conflict_warnings(plan)
+        if warning_lines:
+            warnings.warn(
+                f"{len(warning_lines)} scheduling conflict(s) detected",
+                stacklevel=2,
+            )
+            lines.extend([divider, *warning_lines])
+
+        return "\n".join(lines)

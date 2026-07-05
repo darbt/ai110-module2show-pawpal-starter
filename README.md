@@ -93,10 +93,10 @@ Sample test output:
 
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Sorting behavior  | sort_by_time, sort_by_Pet| by priority and pet name  |
+| Filtering |filter_by_completion |skip tasks that are already completed|
+| Conflict handling | find_conflicts, has_conflicts, conflict_warnings |checks for overlapping time slots for the same pet and issues a warning  |
+
 
 ## 📸 Demo Walkthrough
 

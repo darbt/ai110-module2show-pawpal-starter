@@ -52,6 +52,7 @@ filterPrirority(List Task)
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
+The scheduler filters out the complete tasks before planning. This is reasonable beacause this way a user won't be confused and run a task twice just because the plan does not initially move out tasks that are already completed. The task may be marked as completed, but because it stays where it is in the list, it's not absurd to think that the mark can be missed. 
 ---
 
 ## 3. AI Collaboration
