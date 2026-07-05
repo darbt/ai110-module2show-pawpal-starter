@@ -1,5 +1,8 @@
+from datetime import date, time
+
 import streamlit as st
-from pawpal_system import Owner, Pet, Priority, Scheduler, Task
+
+from pawpal_system import PlanEntry, Priority, Scheduler, Task
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
@@ -7,45 +10,28 @@ st.title("🐾 PawPal+")
 
 st.markdown(
     """
-Welcome to the PawPal+ starter app.
-
-This file is intentionally thin. It gives you a working Streamlit app so you can start quickly,
-but **it does not implement the project logic**. Your job is to design the system and build it.
-
-Use this app as your interactive demo once your backend classes/functions exist.
+**PawPal+** is a pet care planning assistant. Add care tasks for your pets, then let
+the scheduler sort, filter, and pack them into a time-ordered daily plan under your
+available time budget — and flag any scheduling conflicts along the way.
 """
 )
 
-with st.expander("Scenario", expanded=True):
-    st.markdown(
-        """
-**PawPal+** is a pet care planning assistant. It helps a pet owner plan care tasks
-for their pet(s) based on constraints like time, priority, and preferences.
+st.divider()
 
-You will design and implement the scheduling logic and connect it to this Streamlit UI.
-"""
-    )
-
-with st.expander("What you need to build", expanded=True):
-    st.markdown(
-        """
-At minimum, your system should:
-- Represent pet care tasks (what needs to happen, how long it takes, priority)
-- Represent the pet and the owner (basic info and preferences)
-- Build a plan/schedule for a day that chooses and orders tasks based on constraints
-- Explain the plan (why each task was chosen and when it happens)
-"""
-    )
+# --- Owner / pet setup -------------------------------------------------------
+st.subheader("Who are we planning for?")
+col_owner, col_pet = st.columns(2)
+with col_owner:
+    owner_name = st.text_input("Owner name", value="Jordan")
+with col_pet:
+    pet_names_raw = st.text_input("Pet name(s), comma-separated", value="Mochi, Kiwi")
+pet_names = [p.strip() for p in pet_names_raw.split(",") if p.strip()] or ["Pet"]
 
 st.divider()
 
-st.subheader("Quick Demo Inputs (UI only)")
-owner_name = st.text_input("Owner name", value="Jordan")
-pet_name = st.text_input("Pet name", value="Mochi")
-species = st.selectbox("Species", ["dog", "cat", "other"])
-
-st.markdown("### Tasks")
-st.caption("Add a few tasks. In your final version, these should feed into your scheduler.")
+# --- Task entry --------------------------------------------------------------
+st.subheader("Tasks")
+st.caption("Add a few care tasks. These feed directly into the scheduler below.")
 
 if "tasks" not in st.session_state:
     st.session_state.tasks = []
@@ -55,35 +41,107 @@ PRIORITY_MAP = {"low": Priority.LOW, "medium": Priority.MEDIUM, "high": Priority
 col1, col2, col3 = st.columns(3)
 with col1:
     task_title = st.text_input("Task title", value="Morning walk")
+    task_pet = st.selectbox("Pet", pet_names)
 with col2:
     duration = st.number_input("Duration (minutes)", min_value=1, max_value=240, value=20)
-with col3:
     priority = st.selectbox("Priority", ["low", "medium", "high"], index=2)
+with col3:
+    due = st.date_input("Due date", value=date.today())
+    start = st.time_input("Start time", value=time(8, 0))
 
 if st.button("Add task"):
     st.session_state.tasks.append(
-        Task(title=task_title, duration=int(duration), priority=PRIORITY_MAP[priority])
+        Task(
+            title=task_title,
+            duration=int(duration),
+            priority=PRIORITY_MAP[priority],
+            pet_name=task_pet,
+            due_date=due,
+            start_time=start,
+        )
     )
-
-if st.session_state.tasks:
-    st.write("Current tasks:")
-    st.table(
-        [
-            {
-                "title": t.title,
-                "duration_minutes": t.duration,
-                "priority": t.priority.name,
-            }
-            for t in st.session_state.tasks
-        ]
-    )
-else:
-    st.info("No tasks yet. Add one above.")
 
 st.divider()
 
-st.subheader("Build Schedule")
-st.caption("This button should call your scheduling logic once you implement it.")
+# --- Current tasks -----------------------------------------------------------
+st.subheader("Current tasks")
+
+PRIORITY_BADGE = {"HIGH": "🔴 High", "MEDIUM": "🟡 Medium", "LOW": "🟢 Low"}
+
+if not st.session_state.tasks:
+    st.info("No tasks yet. Add one above.")
+else:
+    scheduler_view = Scheduler()
+
+    # At-a-glance summary of the whole task set.
+    all_tasks = st.session_state.tasks
+    done_tasks = scheduler_view.filter_by_completion(all_tasks, completed=True)
+    todo_tasks = scheduler_view.filter_by_completion(all_tasks, completed=False)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total tasks", len(all_tasks))
+    m2.metric("To-do", len(todo_tasks))
+    m3.metric("Completed", len(done_tasks))
+    m4.metric("Minutes of care", sum(t.duration for t in todo_tasks))
+
+    # Scheduler.sort_* methods let the owner reorder the same task set by
+    # different criteria without mutating the underlying list.
+    SORTERS = {
+        "Priority (highest first)": scheduler_view.sort_by_priority,
+        "Time (shortest first)": scheduler_view.sort_by_time,
+        "Pet (grouped A–Z)": scheduler_view.sort_by_pet,
+    }
+    sort_choice = st.radio("Sort by", list(SORTERS.keys()), horizontal=True)
+
+    show_completed = st.checkbox("Show completed tasks", value=False)
+    tasks_to_show = SORTERS[sort_choice](st.session_state.tasks)
+    if not show_completed:
+        # filter_by_completion(completed=False) → still-to-do tasks only.
+        tasks_to_show = scheduler_view.filter_by_completion(tasks_to_show, completed=False)
+
+    # Describe the active view so the sort/filter state is obvious.
+    scope = "all tasks" if show_completed else "to-do tasks only"
+    st.success(f"Showing **{len(tasks_to_show)}** {scope}, sorted by **{sort_choice}**.")
+
+    st.dataframe(
+        [
+            {
+                "Task": t.title,
+                "Pet": t.pet_name,
+                "Start": t.start_time.strftime("%H:%M") if t.start_time else "—",
+                "Due": t.due_date.isoformat() if t.due_date else "—",
+                "Duration": t.duration,
+                "Priority": PRIORITY_BADGE.get(t.priority.name, t.priority.name),
+                "Status": "✅ Done" if t.completed else "⏳ To-do",
+            }
+            for t in tasks_to_show
+        ],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Duration": st.column_config.NumberColumn("Duration", format="%d min"),
+        },
+    )
+
+    # Let the owner mark tasks complete so filter_by_completion is visible.
+    open_tasks = todo_tasks
+    if open_tasks:
+        done_title = st.selectbox(
+            "Mark a task complete",
+            [t.title for t in open_tasks],
+            key="complete_select",
+        )
+        if st.button("Mark complete"):
+            for t in open_tasks:
+                if t.title == done_title:
+                    t.mark_complete()
+                    break
+            st.rerun()
+
+st.divider()
+
+# --- Build schedule ----------------------------------------------------------
+st.subheader("Build schedule")
+st.caption("The scheduler prioritizes, trims to your time budget, and lays out start times.")
 
 available_minutes = st.number_input(
     "Available time today (minutes)", min_value=1, max_value=1440, value=240
@@ -95,4 +153,68 @@ if st.button("Generate schedule"):
     else:
         scheduler = Scheduler(available_minutes=int(available_minutes))
         plan = scheduler.generate_plan(st.session_state.tasks)
-        st.code(scheduler.explain_plan(plan))
+
+        if not plan:
+            st.warning("Nothing fit the available time. Try adding more minutes.")
+        else:
+            used = sum(e.task.duration for e in plan)
+            free = int(available_minutes) - used
+            s1, s2, s3 = st.columns(3)
+            s1.metric("Tasks scheduled", len(plan))
+            s2.metric("Minutes used", used)
+            s3.metric("Minutes free", free)
+
+            st.code(scheduler.explain_plan(plan))
+            st.caption(
+                "This auto-plan packs tasks back-to-back, so it never overlaps. "
+                "Use the conflict check below to test your own start times."
+            )
+
+st.divider()
+
+# --- Conflict check (owner's own start times) --------------------------------
+st.subheader("Conflict check")
+st.caption(
+    "Builds a timeline from the start times you entered and flags any point where "
+    "the same pet is booked in two overlapping slots."
+)
+
+if st.button("Check for conflicts"):
+    scheduler = Scheduler()
+    todo = scheduler.filter_by_completion(st.session_state.tasks, completed=False)
+    timed = [t for t in todo if t.start_time is not None]
+
+    if not timed:
+        st.info("Add some to-do tasks with start times first.")
+    else:
+        # Build a plan from the owner's chosen times, ordered by start time.
+        timeline = [
+            PlanEntry(task=t, start_time=t.start_time)
+            for t in sorted(timed, key=lambda t: t.start_time)
+        ]
+
+        st.dataframe(
+            [
+                {
+                    "Start": e.start_time.strftime("%H:%M"),
+                    "Task": e.task.title,
+                    "Pet": e.task.pet_name,
+                    "Duration": e.task.duration,
+                }
+                for e in timeline
+            ],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Duration": st.column_config.NumberColumn("Duration", format="%d min"),
+            },
+        )
+
+        # find_conflicts / conflict_warnings surface same-pet overlaps.
+        if scheduler.has_conflicts(timeline):
+            conflicts = scheduler.conflict_warnings(timeline)
+            st.warning(f"⚠️ Found {len(conflicts)} scheduling conflict(s):")
+            for line in conflicts:
+                st.warning(line.strip())
+        else:
+            st.success("No time conflicts — every pet's slots are clear. ✅")

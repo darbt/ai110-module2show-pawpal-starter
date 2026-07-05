@@ -29,6 +29,7 @@ class Task:
     title: str
     description: str = ""
     due_date: date | None = None
+    start_time: time | None = None  # when the owner plans to start this task
     duration: int = 0  # minutes
     priority: Priority = Priority.MEDIUM
     pet_name: str = ""  # which pet this task belongs to (for display)

@@ -1,0 +1,69 @@
+classDiagram
+    %% PawPal+ class diagram — reflects final implementation.
+
+    class Owner {
+        +str name
+        +str email
+        +List~Pet~ pets
+        +add_pet(pet: Pet) void
+        +all_tasks() List~Task~
+        +edit_task(pet: Pet, task: Task) void
+    }
+
+    class Pet {
+        +str name
+        +int age
+        +List~Task~ tasks
+        +add_task(task: Task) void
+        +complete_task(task: Task) Task?
+        +edit_task(task: Task) void
+    }
+
+    class Task {
+        +str title
+        +str description
+        +date due_date
+        +time start_time
+        +int duration
+        +Priority priority
+        +str pet_name
+        +int recurrence_days
+        +str id
+        +bool completed
+        +mark_complete() void
+        +next_occurrence() Task?
+    }
+
+    class PlanEntry {
+        +Task task
+        +time start_time
+    }
+
+    class Scheduler {
+        +int available_minutes
+        +time day_start
+        +sort_by_priority(tasks: List~Task~) List~Task~
+        +sort_by_time(tasks: List~Task~) List~Task~
+        +sort_by_pet(tasks: List~Task~) List~Task~
+        +filter_by_completion(tasks: List~Task~, completed: bool) List~Task~
+        +filter_by_time(tasks: List~Task~) List~Task~
+        +generate_plan(tasks: List~Task~) List~PlanEntry~
+        +find_conflicts(plan: List~PlanEntry~) List~tuple~
+        +has_conflicts(plan: List~PlanEntry~) bool
+        +conflict_warnings(plan: List~PlanEntry~) List~str~
+        +explain_plan(plan: List~PlanEntry~) str
+    }
+
+    class Priority {
+        <<enumeration>>
+        HIGH
+        MEDIUM
+        LOW
+    }
+
+    Owner "1" --> "*" Pet : owns
+    Pet "1" --> "*" Task : has
+    Scheduler ..> Task : sorts/filters
+    Scheduler ..> PlanEntry : produces
+    PlanEntry "1" --> "1" Task : places
+    Task --> Priority : uses
